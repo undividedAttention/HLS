@@ -1,55 +1,50 @@
-import json
 import torch
 from torch.utils.data import Dataset
-from src.utils import get_synonym_mapping
+import json
 
-class TCMDataset(Dataset):
-    def __init__(self, file_path, tokenizer, label2id, max_seq_len):
+class DualStreamTCMDataset(Dataset):
+    def __init__(self, file_path, tokenizer, label2id, max_len_cc=32, max_len_od=256):
         self.tokenizer = tokenizer
         self.label2id = label2id
-        self.max_seq_len = max_seq_len
-        self.data = self._load_data(file_path)
-
-    def _load_data(self, file_path):
-        """加载数据，并确保标签是标准形式"""
-        processed_data = []
+        self.max_len_cc = max_len_cc
+        self.max_len_od = max_len_od
+        
         with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                item = json.loads(line)
-                
-                text = f"主诉：{item.get('chief_complaint', '')}。病史：{item.get('description', '')}。四诊信息：{item.get('detection', '')}"
-                
-                # 直接使用您提供的、已经合并好的 'merge_syndrome' 字段
-                canonical_label = item.get('merge_syndrome')
-                
-                if canonical_label in self.label2id:
-                    label_id = self.label2id[canonical_label]
-                    processed_data.append({'text': text, 'label': label_id})
-        return processed_data
+            self.data = json.load(f)
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         item = self.data[idx]
-        text = item['text']
-        label = item['label']
+        
+        chief_complaint = item.get("chief_complaint", "")
+        other_description = item.get("description", "") + " " + item.get("detection", "")
+        label_str = item.get("merge_syndrome")
+        
+        if label_str not in self.label2id:
+            # 遇到无效标签时，返回None，由collate_fn处理
+            return None
 
-        inputs = self.tokenizer.encode_plus(
-            text,
-            add_special_tokens=True,
-            max_length=self.max_seq_len,
-            padding='max_length',
-            truncation=True,
-            return_token_type_ids=True,
-            return_attention_mask=True,
-            return_tensors='pt'
+        label = self.label2id[label_str]
+
+        cc_encoding = self.tokenizer.encode_plus(
+            chief_complaint, add_special_tokens=True, max_length=self.max_len_cc,
+            padding='max_length', truncation=True, return_attention_mask=True,
+            return_tensors='pt',
+        )
+        
+        od_encoding = self.tokenizer.encode_plus(
+            other_description, add_special_tokens=True, max_length=self.max_len_od,
+            padding='max_length', truncation=True, return_attention_mask=True,
+            return_tensors='pt',
         )
 
         return {
-            'input_ids': inputs['input_ids'].flatten(),
-            'attention_mask': inputs['attention_mask'].flatten(),
-            'token_type_ids': inputs['token_type_ids'].flatten(),
+            'cc_input_ids': cc_encoding['input_ids'].flatten(),
+            'cc_attention_mask': cc_encoding['attention_mask'].flatten(),
+            'od_input_ids': od_encoding['input_ids'].flatten(),
+            'od_attention_mask': od_encoding['attention_mask'].flatten(),
             'labels': torch.tensor(label, dtype=torch.long)
         }
 
