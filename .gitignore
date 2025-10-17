@@ -64,11 +64,18 @@ output/
 results/
 checkpoints/
 
-# Large data files (optional - uncomment if needed)
-# *.json
-# *.txt
-# *.gml
-# *.npy
+# Large data files
+data/train.json
+data/dev.json
+data/test.json
+ZY-BERT/pytorch_model.bin
+ZY-BERT/model.safetensors
+ZY-BERT/flax_model.msgpack
+ZY-BERT/tf_model.h5
+*.bin
+*.safetensors
+*.msgpack
+*.h5
 
 # Temporary files
 tmp/
