@@ -29,10 +29,9 @@ def train(model, train_loader, optimizer, scheduler, criterion, device):
         if batch is None: continue
         optimizer.zero_grad()
         logits = model(
-            cc_input_ids=batch['cc_input_ids'].to(device),
-            cc_attention_mask=batch['cc_attention_mask'].to(device),
-            od_input_ids=batch['od_input_ids'].to(device),
-            od_attention_mask=batch['od_attention_mask'].to(device)
+            input_ids=batch['input_ids'].to(device),
+            attention_mask=batch['attention_mask'].to(device),
+            token_type_ids=batch['token_type_ids'].to(device)
         )
         labels = batch['labels'].to(device)
         loss = criterion(logits, labels)
@@ -58,10 +57,9 @@ def evaluate(model, data_loader, criterion, device, id2label, distance_matrix):
         for batch in tqdm(data_loader, desc="Evaluating", leave=False):
             if batch is None: continue
             logits = model(
-                cc_input_ids=batch['cc_input_ids'].to(device),
-                cc_attention_mask=batch['cc_attention_mask'].to(device),
-                od_input_ids=batch['od_input_ids'].to(device),
-                od_attention_mask=batch['od_attention_mask'].to(device)
+                input_ids=batch['input_ids'].to(device),
+                attention_mask=batch['attention_mask'].to(device),
+                token_type_ids=batch['token_type_ids'].to(device)
             )
             labels = batch['labels'].to(device)
             loss = criterion(logits, labels)
@@ -98,13 +96,13 @@ def main(config):
     if config.do_preprocess:
         preprocess_and_save(config)
     
-    label2id, id2label, distance_matrix, class_weights = load_preprocessed_data_v11(config)
+    label2id, id2label, graph_map, adj_matrix, distance_matrix = load_preprocessed_data_v11(config)
     
     tokenizer = AutoTokenizer.from_pretrained(config.bert_path)
     
-    train_dataset = DualStreamTCMDataset(config.train_path, tokenizer, label2id, config.max_len_cc, config.max_len_od)
-    dev_dataset = DualStreamTCMDataset(config.dev_path, tokenizer, label2id, config.max_len_cc, config.max_len_od)
-    test_dataset = DualStreamTCMDataset(config.test_path, tokenizer, label2id, config.max_len_cc, config.max_len_od)
+    train_dataset = DualStreamTCMDataset(config.train_path, tokenizer, label2id, config.max_seq_len)
+    dev_dataset = DualStreamTCMDataset(config.dev_path, tokenizer, label2id, config.max_seq_len)
+    test_dataset = DualStreamTCMDataset(config.test_path, tokenizer, label2id, config.max_seq_len)
 
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=0, collate_fn=collate_fn)
     dev_loader = DataLoader(dev_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0, collate_fn=collate_fn)
@@ -114,7 +112,7 @@ def main(config):
     model.to(device)
     if n_gpu > 1: model = nn.DataParallel(model)
     
-    criterion = HybridLoss(distance_matrix, class_weights, device, 
+    criterion = HybridLoss(distance_matrix, torch.ones(len(label2id)), device, 
                           lambda_focal=config.lambda_focal, lambda_hls=config.lambda_hls,
                           gamma=config.gamma, temperature_hls=config.temperature)
     

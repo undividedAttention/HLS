@@ -156,13 +156,6 @@ def load_preprocessed_data_v11(config):
     with open(config.label_map_path, 'r', encoding='utf-8') as f:
         label_map = json.load(f)
     distance_matrix = np.load(config.distance_matrix_path + '.npy')
-    
-    # 如果class_weights文件不存在，创建默认的权重
-    try:
-        class_weights = torch.load(config.class_weights_path)
-    except FileNotFoundError:
-        print("class_weights.pt文件不存在，使用默认权重")
-        class_weights = torch.ones(len(label_map['label2id']))
-    
+    class_weights = torch.load(config.class_weights_path)
     return label_map['label2id'], label_map['id2label'], torch.from_numpy(distance_matrix), class_weights
 

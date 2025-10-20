@@ -9,11 +9,8 @@ class DualStreamTCMDataset(Dataset):
         self.max_len_cc = max_len_cc
         self.max_len_od = max_len_od
         
-        self.data = []
         with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.strip():
-                    self.data.append(json.loads(line.strip()))
+            self.data = json.load(f)
 
     def __len__(self):
         return len(self.data)
