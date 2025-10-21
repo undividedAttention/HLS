@@ -15,7 +15,6 @@ class HybridLoss(nn.Module):
         
         self.register_buffer("distance_matrix", distance_matrix.to(device))
         self.temperature_hls = temperature_hls
-        self.num_classes = distance_matrix.shape[0]
 
     class FocalLoss(nn.Module):
         def __init__(self, alpha, gamma=2.0, reduction='mean'):
@@ -29,7 +28,6 @@ class HybridLoss(nn.Module):
             pt = torch.exp(-ce_loss)
             
             alpha_t = self.alpha[true_labels]
-            
             focal_loss = alpha_t * (1 - pt)**self.gamma * ce_loss
             
             if self.reduction == 'mean': return focal_loss.mean()
@@ -42,8 +40,15 @@ class HybridLoss(nn.Module):
         return kl_div
 
     def forward(self, logits, true_labels):
-        loss_f = self.focal_loss_fn(logits, true_labels)
-        loss_h = self.hls_loss(logits, true_labels)
+        if self.lambda_focal > 0:
+            loss_f = self.focal_loss_fn(logits, true_labels)
+        else:
+            loss_f = 0
+
+        if self.lambda_hls > 0:
+            loss_h = self.hls_loss(logits, true_labels)
+        else:
+            loss_h = 0
         
         total_loss = self.lambda_focal * loss_f + self.lambda_hls * loss_h
         return total_loss

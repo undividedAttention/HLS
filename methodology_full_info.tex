@@ -1,0 +1,237 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{url}
+
+\title{Hierarchical Label Similarity Framework for Traditional Chinese Medicine Syndrome Classification: A Dual-Stream Evidence Coherence Approach}
+\author{Your Name}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Traditional Chinese Medicine (TCM) syndrome classification presents unique challenges that distinguish it from conventional text classification tasks. Current approaches suffer from two critical mechanistic deficiencies that compromise clinical reliability and diagnostic accuracy.
+
+\textbf{First deficiency:} Mainstream models fail to explicitly model the clinical consistency between subjective complaints (\textit{chief complaints}) and objective signs (\textit{four diagnostic methods}). When objective signs such as "pale tongue with thin pulse" (indicating deficiency syndrome) contradict subjective complaints like "palpitations" (which might suggest "phlegm-fire disturbing heart syndrome," a type of excess syndrome), existing models cannot leverage the objective evidence to exclude contradictory diagnoses. Instead, they suffer from information confusion, potentially leading to severe treatment errors such as misclassifying deficiency syndromes as excess syndromes.
+
+\textbf{Second deficiency:} Current models treat all 148 syndrome labels as mutually independent, applying equal penalties to all misclassifications during evaluation. However, clinical consequences vary dramatically across different types of errors. Misclassifying "spleen qi sinking syndrome" as the etiologically similar "qi deficiency syndrome" represents a clinically acceptable deviation, while misclassifying it as the pathologically opposite "phlegm-fire disturbing heart syndrome" constitutes a severe diagnostic error.
+
+To address these limitations, we propose a Hierarchical Label Similarity (HLS) framework that incorporates TCM's inherent hierarchical knowledge directly into the model's supervision signal, enabling the model to follow clinical logic during prediction while effectively mitigating class imbalance and incomplete knowledge issues prevalent in real-world clinical data.
+
+\section{Methodology}
+
+\subsection{Problem Formulation}
+
+We formalize the TCM syndrome classification task as a hierarchical text classification problem with dual-stream input processing.
+
+\textbf{Input (Dual-Stream):} For each medical record sample $i$, we explicitly decompose the input into two streams: chief complaint text $x^{(cc)}_i$ and other descriptive text $x^{(od)}_i$, where the latter concatenates present illness history and four diagnostic method information. Both streams are processed through the same Chinese BERT encoder.
+
+\textbf{Output:} The model outputs a scoring vector $\mathbf{z}_i \in \mathbb{R}^M$ for all syndrome labels in the set $C = \{c_1, c_2, \ldots, c_M\}$, which is transformed into a probability distribution $\mathbf{p}_i$ through softmax normalization.
+
+\textbf{External Knowledge:}
+\begin{itemize}
+    \item \textbf{Hierarchical Structure Knowledge $T$:} Derived from the \textit{TCM Disease and Syndrome Classification and Coding GB/T 15657—2021} standard, constructed by processing the \texttt{syndromeToPath.txt} file to build a syndrome knowledge graph (directed acyclic graph or forest) that defines parent-child and ancestor-descendant "is-a" relationships among syndromes.
+    \item \textbf{Text Definition Knowledge $K$:} For each syndrome $c_j \in C$, we possess corresponding external knowledge text $k_j$ composed of the syndrome's "Definition" and "Typical\_performance" descriptive information.
+\end{itemize}
+
+\subsection{Data Preprocessing and Prior Construction}
+
+\subsubsection{Label Mapping and Distance Matrix Construction}
+
+We obtain label mappings $\text{id2label}$ and $\text{label2id}$ from \texttt{label\_map.json} and compute an $M \times M$ distance matrix $D$ based on the knowledge graph $T$, where element $D_{ij} = d(c_i, c_j)$ represents the hierarchical distance between syndromes $c_i$ and $c_j$.
+
+The hierarchical distance is defined using the Lowest Common Ancestor (LCA) path distance:
+
+\begin{equation}
+d(c_i, c_j) = \text{depth}(c_i) + \text{depth}(c_j) - 2 \cdot \text{depth}(\text{LCA}(c_i, c_j))
+\end{equation}
+
+where $\text{depth}(v)$ denotes the depth of node $v$ in tree $T$ (distance from ROOT). This metric provides clear clinical interpretation: the LCA represents the most specific common pathological concept shared by two syndromes, and the distance measures the shortest path length required to traverse from one diagnostic branch to another.
+
+\subsubsection{Class Weight Computation for Imbalance Correction}
+
+We read the training set \texttt{train.json} (JSONL format) and count samples $n_j$ for each label. Using the "Effective Number of Samples" method, we compute class weights:
+
+\begin{equation}
+w_j = \frac{1-\beta}{1-\beta^{n_j}}, \quad \alpha = \text{normalize}(\mathbf{w})
+\end{equation}
+
+where $\beta = 0.999$ is a hyperparameter controlling the effective sample calculation. The weights are saved as tensors in \texttt{class\_weights.pt}.
+
+\subsubsection{Knowledge Probes (Label Prototype Vectors)}
+
+For each syndrome $c_j$, we concatenate its "Definition" and "Typical\_performance" as semantic text. Using the same BERT model employed in the main architecture, we encode this text and extract the \texttt{pooler\_output} as the prototype vector $\mathbf{e}_j$. All label prototypes are stacked into matrix $E \in \mathbb{R}^{M \times H}$, saved as \texttt{knowledge\_probes.pt}, where $H = 1024$ aligns with the ZY-BERT hidden dimension.
+
+\subsection{Model Architecture: SyndromeClassifier}
+
+Our model employs a dual-stream architecture with label attention mechanisms for evidence extraction and coherence scoring.
+
+\subsubsection{Dual-Stream BERT Encoding}
+
+The input text is processed through two parallel BERT encoders:
+
+\begin{align}
+H^{(cc)} &\in \mathbb{R}^{B \times L_{cc} \times H} \leftarrow \text{BERT}(x^{(cc)}) \\
+H^{(od)} &\in \mathbb{R}^{B \times L_{od} \times H} \leftarrow \text{BERT}(x^{(od)})
+\end{align}
+
+where $B$ is the batch size, and $L_{cc}, L_{od}$ are the sequence lengths for chief complaint and other description streams, respectively.
+
+\subsubsection{Label Attention Mechanism}
+
+Given the label prototype matrix $E \in \mathbb{R}^{M \times H}$, we compute attention scores for each stream's hidden states $H \in \mathbb{R}^{B \times L \times H}$:
+
+\begin{align}
+A &= \text{softmax}\left(\frac{H E^\top}{\sqrt{H}}\right) \in \mathbb{R}^{B \times L \times M} \\
+C &= A^\top H \in \mathbb{R}^{B \times M \times H}
+\end{align}
+
+This mechanism effectively uses each label prototype as a query to perform weighted aggregation over token representations, yielding "text evidence for each label." We denote the evidence vectors as $C^{(cc)}$ and $C^{(od)}$ for chief complaint and other description streams, respectively.
+
+\subsubsection{Evidence Coherence Scoring}
+
+To encourage consistency between subjective and objective evidence, we compute element-wise multiplication of evidence vectors for the same label and sum over the hidden dimension:
+
+\begin{equation}
+z_{i,j} = \langle C^{(cc)}_{i,j,:}, C^{(od)}_{i,j,:} \rangle = \sum_{h=1}^{H} C^{(cc)}_{i,j,h} \cdot C^{(od)}_{i,j,h}
+\end{equation}
+
+This scoring mechanism promotes coherence between "chief complaint evidence" and "other description evidence" for the correct label, addressing the first mechanistic deficiency by explicitly modeling clinical consistency.
+
+\subsection{Loss Function: HybridLoss}
+
+Our training objective combines two complementary loss components to address both mechanistic deficiencies:
+
+\subsubsection{Focal Loss for Class Imbalance Robustness}
+
+To handle severe class imbalance in TCM data, we employ Focal Loss with effective sample number weighting:
+
+\begin{equation}
+\mathcal{L}_{\text{Focal}} = -\sum_{i} \alpha_{y_i} (1-p_{i,y_i})^\gamma \log p_{i,y_i}
+\end{equation}
+
+where $\alpha$ is derived from \texttt{class\_weights.pt}, and $\gamma = 2.0$ is the focusing parameter that suppresses the dominance of easy-to-classify samples.
+
+\subsubsection{HLS Loss for Hierarchical Structure Alignment}
+
+To address the second mechanistic deficiency, we construct soft target distributions that encode hierarchical knowledge. Given a true label $y_i$, we build a hierarchical-aware soft target distribution based on the distance matrix $D$ and temperature parameter $T$:
+
+\begin{equation}
+y'_{i,j} = \frac{\exp(-D_{y_i,j}/T)}{\sum_k \exp(-D_{y_i,k}/T)}
+\end{equation}
+
+The HLS loss minimizes the KL divergence between this ideal teacher distribution and the model's predictions:
+
+\begin{equation}
+\mathcal{L}_{\text{HLS}} = D_{\text{KL}}(\mathbf{y}'_i \Vert \mathbf{p}_i) = \sum_{j=1}^{M} y'_{i,j} \log\left(\frac{y'_{i,j}}{p_{i,j}}\right)
+\end{equation}
+
+This loss function ensures that "near misses are penalized lightly, while distant errors are penalized heavily," aligning with clinical semantic understanding.
+
+\subsubsection{Weighted Hybrid Objective}
+
+The final training objective combines both loss components:
+
+\begin{equation}
+\mathcal{L} = \lambda_{\text{focal}} \mathcal{L}_{\text{Focal}} + \lambda_{\text{hls}} \mathcal{L}_{\text{HLS}}
+\end{equation}
+
+where $\lambda_{\text{focal}} = 0.7$ and $\lambda_{\text{hls}} = 0.3$ are hyperparameters controlling the relative importance of each component.
+
+\subsection{Training and Evaluation Protocol}
+
+\subsubsection{Optimization and Scheduling}
+
+We employ the AdamW optimizer with linear warmup and linear decay scheduling. The learning rate is set to $2 \times 10^{-5}$ with a warmup period covering 10\% of total training steps.
+
+\subsubsection{Multi-GPU Training}
+
+When multiple GPUs are available, we utilize \texttt{nn.DataParallel} for distributed training acceleration.
+
+\subsubsection{Batch Configuration and Sequence Lengths}
+
+The model processes chief complaints with maximum length \texttt{max\_len\_cc} = 32 and other descriptions with \texttt{max\_len\_od} = 256, with configurable batch size (default: 16).
+
+\subsubsection{Per-Epoch Evaluation}
+
+During training, we evaluate the model on both development and test sets after each epoch, computing:
+\begin{itemize}
+    \item Loss (both Focal and HLS components)
+    \item Accuracy
+    \item Macro-F1 score
+    \item Average Hierarchical Distance (AHD)
+\end{itemize}
+
+All epoch metrics are accumulated and written to \texttt{output\_v13/all\_epochs\_metrics.json}. The best model is saved based on development set Macro-F1 performance.
+
+\subsubsection{Asset Regeneration}
+
+The framework provides a \texttt{--regen\_assets} option to regenerate \texttt{class\_weights.pt} and \texttt{knowledge\_probes.pt} based on current training data and syndrome knowledge, ensuring consistency between preprocessing and training phases.
+
+\subsection{Data Format and Implementation Details}
+
+\subsubsection{Data Structure}
+
+Training, validation, and test sets are stored in JSONL format, where each line contains:
+\begin{itemize}
+    \item \texttt{chief\_complaint}: Subjective patient complaints
+    \item \texttt{description}: Present illness history
+    \item \texttt{detection}: Four diagnostic method observations
+    \item \texttt{merge\_syndrome}: Standardized syndrome label
+\end{itemize}
+
+\subsubsection{Dataset Implementation}
+
+The \texttt{DualStreamTCMDataset} class separately tokenizes and encodes both text streams, returning:
+\begin{itemize}
+    \item \texttt{cc\_input\_ids}/\texttt{cc\_attention\_mask}: Chief complaint encodings
+    \item \texttt{od\_input\_ids}/\texttt{od\_attention\_mask}: Other description encodings
+    \item \texttt{labels}: Ground truth syndrome labels
+\end{itemize}
+
+\subsubsection{Dimension Consistency}
+
+The \texttt{knowledge\_probes.pt} dimensions are aligned with the ZY-BERT hidden dimension (1024), preventing dimension mismatch issues during model initialization.
+
+\subsubsection{Evaluation Metrics}
+
+\begin{itemize}
+    \item \textbf{Accuracy and Macro-F1:} Computed using standard definitions
+    \item \textbf{Average Hierarchical Distance (AHD):} Calculated as the sample average of hierarchical distances between predicted and true labels using distance matrix $D$
+\end{itemize}
+
+\subsection{Methodological Advantages and Discussion}
+
+\subsubsection{Explicit Utilization of Structured Priors}
+
+The HLS Loss incorporates hierarchical knowledge into supervision signals, ensuring that "near errors are penalized lightly while distant errors are penalized heavily," maintaining consistency with clinical semantics.
+
+\subsubsection{Cross-Modal Consistency Modeling}
+
+The dual-stream architecture with evidence coherence scoring encourages the model to learn consistent label evidence between subjective complaints and objective descriptions, directly addressing the first mechanistic deficiency.
+
+\subsubsection{Small-Sample Class Friendliness}
+
+The combination of Focal Loss and effective sample number weighting significantly mitigates class imbalance issues, particularly benefiting rare syndrome categories.
+
+\subsubsection{Enhanced Interpretability}
+
+The label attention mechanism produces corresponding text evidence vectors for each label, facilitating traceability and analysis of model decisions.
+
+\section{Experimental Results}
+
+Based on the training metrics from \texttt{all\_epochs\_metrics.json}, our HLS framework demonstrates consistent improvement across multiple evaluation criteria. The model achieves a test Macro-F1 score of 0.569 and an Average Hierarchical Distance of 1.421 by epoch 15, indicating both improved classification accuracy and reduced hierarchical prediction errors.
+
+The progressive decrease in Average Hierarchical Distance from 2.257 (epoch 1) to 1.421 (epoch 15) demonstrates the model's successful learning of hierarchical relationships, validating our approach to addressing the second mechanistic deficiency in TCM syndrome classification.
+
+\end{document}

@@ -9,8 +9,11 @@ class DualStreamTCMDataset(Dataset):
         self.max_len_cc = max_len_cc
         self.max_len_od = max_len_od
         
+        self.data = []
         with open(file_path, 'r', encoding='utf-8') as f:
-            self.data = json.load(f)
+            for line in f:
+                if line.strip():
+                    self.data.append(json.loads(line.strip()))
 
     def __len__(self):
         return len(self.data)
@@ -23,7 +26,6 @@ class DualStreamTCMDataset(Dataset):
         label_str = item.get("merge_syndrome")
         
         if label_str not in self.label2id:
-            # 遇到无效标签时，返回None，由collate_fn处理
             return None
 
         label = self.label2id[label_str]
