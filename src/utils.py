@@ -341,3 +341,35 @@ def regenerate_assets(config, label2id: dict):
     print(f"Saved class_weights -> {config.class_weights_path}")
     print(f"Saved knowledge_probes -> {config.knowledge_probes_path}")
 
+
+def load_preprocessed_data():
+    """加载所有预处理好的数据，返回字典"""
+    import os
+    
+    # 路径配置
+    base_dir = "preprocessed_data"
+    
+    # 加载标签映射
+    with open(os.path.join(base_dir, "label_map.json"), 'r', encoding='utf-8') as f:
+        label_map = json.load(f)
+    
+    label2id = label_map['label2id']
+    id2label = {int(k): v for k, v in label_map['id2label'].items()}
+    
+    # 加载距离矩阵
+    distance_matrix = np.load(os.path.join(base_dir, "syndrome_distance_matrix.npy"))
+    
+    # 加载类别权重
+    class_weights = torch.load(os.path.join(base_dir, "class_weights.pt"))
+    
+    # 加载知识探针
+    knowledge_probes = torch.load(os.path.join(base_dir, "knowledge_probes.pt"))
+    
+    return {
+        'label2id': label2id,
+        'id2label': id2label,
+        'distance_matrix': torch.from_numpy(distance_matrix),
+        'class_weights': class_weights,
+        'knowledge_probes': knowledge_probes
+    }
+
