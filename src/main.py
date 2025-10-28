@@ -7,7 +7,8 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AdamW, get_linear_schedule_with_warmup
 from tqdm import tqdm
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, classification_report
+from sklearn.metrics import accuracy_score, f1_score, classification_report, average_precision_score
+from sklearn.preprocessing import label_binarize
 
 from src.utils import preprocess_and_save, load_preprocessed_data_v13, regenerate_assets
 from src.dataset import DualStreamTCMDataset
@@ -52,7 +53,8 @@ def evaluate(model, data_loader, criterion, device, id2label, distance_matrix):
     model.eval()
     total_loss = 0
     total_hier_dist = 0
-    all_preds, all_labels = [], []
+    all_preds, all_labels, all_probs = [], [], []
+    num_labels = len(id2label)
 
     with torch.no_grad():
         for batch in tqdm(data_loader, desc="Evaluating", leave=False):
@@ -70,26 +72,33 @@ def evaluate(model, data_loader, criterion, device, id2label, distance_matrix):
             total_loss += loss.item()
             
             preds = torch.argmax(logits, dim=1)
+            probs = torch.softmax(logits, dim=1)
             
             for i in range(len(labels)):
                 total_hier_dist += distance_matrix[labels[i].item(), preds[i].item()]
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
+            all_probs.append(probs.cpu().numpy())
 
     if not all_labels:
-        return 0, 0, 0, 0, "没有样本可供评估。"
+        return 0, 0, 0, 0, 0, "没有样本可供评估。"
         
     avg_loss = total_loss / len(data_loader)
     avg_hier_dist = total_hier_dist / len(all_labels)
     accuracy = accuracy_score(all_labels, all_preds)
     f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
     
+    # 计算AUPRC
+    labels_one_hot = label_binarize(all_labels, classes=list(range(num_labels)))
+    all_probs_np = np.concatenate(all_probs, axis=0)
+    auprc = average_precision_score(labels_one_hot, all_probs_np, average='macro', zero_division=0)
+    
     unique_labels = np.unique(all_labels + all_preds)
     target_names = [id2label.get(str(i)) for i in unique_labels if str(i) in id2label]
     report = classification_report(all_labels, all_preds, target_names=target_names, digits=4, zero_division=0)
 
-    return avg_loss, accuracy, f1, avg_hier_dist, report
+    return avg_loss, accuracy, f1, avg_hier_dist, auprc, report
 
 def main(config):
     device = torch.device("cuda" if torch.cuda.is_available() and not config.no_cuda else "cpu")
@@ -125,10 +134,10 @@ def main(config):
     for epoch in range(config.epochs):
         print(f"\n--- Epoch {epoch+1}/{config.epochs} ---")
         train(model, train_loader, optimizer, scheduler, criterion, device)
-        dev_loss, dev_acc, dev_f1, dev_ahd, _ = evaluate(model, dev_loader, criterion, device, id2label, distance_matrix.numpy())
-        test_loss, test_acc, test_f1, test_ahd, _ = evaluate(model, test_loader, criterion, device, id2label, distance_matrix.numpy())
-        print(f"Epoch {epoch+1} Dev Loss: {dev_loss:.4f}, Acc: {dev_acc:.4f}, Macro-F1: {dev_f1:.4f}, AHD: {dev_ahd:.4f}")
-        print(f"Epoch {epoch+1} Test Loss: {test_loss:.4f}, Acc: {test_acc:.4f}, Macro-F1: {test_f1:.4f}, AHD: {test_ahd:.4f}")
+        dev_loss, dev_acc, dev_f1, dev_ahd, dev_auprc, _ = evaluate(model, dev_loader, criterion, device, id2label, distance_matrix.numpy())
+        test_loss, test_acc, test_f1, test_ahd, test_auprc, _ = evaluate(model, test_loader, criterion, device, id2label, distance_matrix.numpy())
+        print(f"Epoch {epoch+1} Dev Loss: {dev_loss:.4f}, Acc: {dev_acc:.4f}, Macro-F1: {dev_f1:.4f}, AHD: {dev_ahd:.4f}, AUPRC: {dev_auprc:.4f}")
+        print(f"Epoch {epoch+1} Test Loss: {test_loss:.4f}, Acc: {test_acc:.4f}, Macro-F1: {test_f1:.4f}, AHD: {test_ahd:.4f}, AUPRC: {test_auprc:.4f}")
 
         epoch_metrics.append({
             'epoch': epoch+1,
@@ -136,10 +145,12 @@ def main(config):
             'dev_accuracy': dev_acc,
             'dev_macro_f1': dev_f1,
             'dev_avg_hier_distance': dev_ahd,
+            'dev_auprc': dev_auprc,
             'test_loss': test_loss,
             'test_accuracy': test_acc,
             'test_macro_f1': test_f1,
             'test_avg_hier_distance': test_ahd,
+            'test_auprc': test_auprc,
         })
 
         if dev_f1 > best_f1:
@@ -165,8 +176,8 @@ def main(config):
     final_model.to(device)
     if n_gpu > 1: final_model = nn.DataParallel(final_model)
     
-    _, test_acc, test_f1, test_ahd, test_report = evaluate(final_model, test_loader, criterion, device, id2label, distance_matrix.numpy())
-    print(f"\nTest Acc: {test_acc:.4f}, Macro-F1: {test_f1:.4f}, AHD: {test_ahd:.4f}")
+    _, test_acc, test_f1, test_ahd, test_auprc, test_report = evaluate(final_model, test_loader, criterion, device, id2label, distance_matrix.numpy())
+    print(f"\nTest Acc: {test_acc:.4f}, Macro-F1: {test_f1:.4f}, AHD: {test_ahd:.4f}, AUPRC: {test_auprc:.4f}")
     print("\n--- Test Set Classification Report ---\n", test_report)
 
 if __name__ == '__main__':

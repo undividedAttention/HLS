@@ -82,3 +82,9 @@ tmp/
 temp/
 *.tmp
 *.temp
+
+# Backup ignore
+output_ablation_exp1/best_model.pt
+output_ablation_exp2/best_model.pt
+output_v13/best_model.pt
+ZY-BERT/pytorch_model.bin

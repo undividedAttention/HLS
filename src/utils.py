@@ -25,8 +25,13 @@ def create_knowledge_probes(config, label2id, device):
     
     # 加载知识文件
     try:
+        knowledge_data = []
         with open(config.knowledge_path, 'r', encoding='utf-8') as f:
-            knowledge_data = json.load(f)
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                knowledge_data.append(json.loads(line))
     except FileNotFoundError:
         print(f"错误: 知识文件未找到于 {config.knowledge_path}")
         return
