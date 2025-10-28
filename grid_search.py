@@ -35,10 +35,10 @@ def evaluate(model, data_loader, criterion, device, id2label, distance_matrix):
             if batch is None:
                 continue
             
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
+            input_ids = batch['concatenated_input_ids'].to(device)
+            attention_mask = batch['concatenated_attention_mask'].to(device)
             
-            logits = model(input_ids=input_ids, attention_mask=attention_mask)
+            logits = model(concatenated_input_ids=input_ids, concatenated_attention_mask=attention_mask)
             labels = batch['labels'].to(device)
             loss = criterion(logits, labels)
 
@@ -92,17 +92,8 @@ def run_grid_search(args, search_space):
     print("Loading data...")
     data = load_preprocessed_data()
     
-    train_dataset = SingleStreamTCMDataset(
-        data_path=args.train_data,
-        label2id=data['label2id'],
-        tokenizer_path=args.bert_path
-    )
-    
-    dev_dataset = SingleStreamTCMDataset(
-        data_path=args.dev_data,
-        label2id=data['label2id'],
-        tokenizer_path=args.bert_path
-    )
+    # 加载tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(args.bert_path)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_gpu = torch.cuda.device_count()
@@ -119,6 +110,19 @@ def run_grid_search(args, search_space):
                     print(f"\n{'='*80}")
                     print(f"Config: {config_name}")
                     print(f"{'='*80}")
+                    
+                    # 创建数据集（每个配置重新创建，避免内存问题）
+                    train_dataset = SingleStreamTCMDataset(
+                        file_path=args.train_data,
+                        tokenizer=tokenizer,
+                        label2id=data['label2id']
+                    )
+                    
+                    dev_dataset = SingleStreamTCMDataset(
+                        file_path=args.dev_data,
+                        tokenizer=tokenizer,
+                        label2id=data['label2id']
+                    )
                     
                     # 创建数据加载器
                     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
@@ -167,11 +171,11 @@ def run_grid_search(args, search_space):
                             if batch is None:
                                 continue
                             
-                            input_ids = batch['input_ids'].to(device)
-                            attention_mask = batch['attention_mask'].to(device)
+                            input_ids = batch['concatenated_input_ids'].to(device)
+                            attention_mask = batch['concatenated_attention_mask'].to(device)
                             labels = batch['labels'].to(device)
                             
-                            logits = model(input_ids=input_ids, attention_mask=attention_mask)
+                            logits = model(concatenated_input_ids=input_ids, concatenated_attention_mask=attention_mask)
                             loss = criterion(logits, labels)
                             
                             if hasattr(model, 'module'):

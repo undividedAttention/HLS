@@ -35,9 +35,10 @@ def evaluate(model, data_loader, criterion, device, id2label, distance_matrix):
             if batch is None:
                 continue
             
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
+            input_ids = batch['concatenated_input_ids'].to(device)
+            attention_mask = batch['concatenated_attention_mask'].to(device)
             
+            # SimpleClassifier使用input_ids作为参数名
             logits = model(input_ids=input_ids, attention_mask=attention_mask)
             labels = batch['labels'].to(device)
             loss = criterion(logits, labels)
@@ -90,22 +91,25 @@ def main(args):
     print("\nLoading data...")
     data = load_preprocessed_data()
     
+    # 加载tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(args.bert_path)
+    
     train_dataset = SingleStreamTCMDataset(
-        data_path=args.train_data,
-        label2id=data['label2id'],
-        tokenizer_path=args.bert_path
+        file_path=args.train_data,
+        tokenizer=tokenizer,
+        label2id=data['label2id']
     )
     
     dev_dataset = SingleStreamTCMDataset(
-        data_path=args.dev_data,
-        label2id=data['label2id'],
-        tokenizer_path=args.bert_path
+        file_path=args.dev_data,
+        tokenizer=tokenizer,
+        label2id=data['label2id']
     )
     
     test_dataset = SingleStreamTCMDataset(
-        data_path=args.test_data,
-        label2id=data['label2id'],
-        tokenizer_path=args.bert_path
+        file_path=args.test_data,
+        tokenizer=tokenizer,
+        label2id=data['label2id']
     )
     
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
@@ -156,8 +160,8 @@ def main(args):
             if batch is None:
                 continue
             
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
+            input_ids = batch['concatenated_input_ids'].to(device)
+            attention_mask = batch['concatenated_attention_mask'].to(device)
             labels = batch['labels'].to(device)
             
             logits = model(input_ids=input_ids, attention_mask=attention_mask)
