@@ -32,10 +32,10 @@
 source /opt/miniconda/etc/profile.d/conda.sh
 conda activate hls_env
 
-# 运行网格搜索（约3小时）
+# 运行网格搜索（约10-15小时，81个组合 × 15 epochs）
 CUDA_VISIBLE_DEVICES=0 python grid_search.py \
     --batch_size 16 \
-    --epochs 5 \
+    --epochs 15 \
     --output_dir output_grid_search
 ```
 
@@ -143,7 +143,7 @@ CUDA_VISIBLE_DEVICES=0 python train_ablation3_random_probes.py \
 
 ## 注意
 
-1. **网格搜索耗时较长**（3个λ_focal × 3个λ_hls × 3个lr × 3个gamma × 5 epochs），建议在screen中运行
+1. **网格搜索耗时较长**（3×3×3×3=81个组合 × 15 epochs，预计10-15小时），建议在screen中运行
 2. 所有实验使用**相同的学习率和gamma**（来自网格搜索最优配置）
 3. 保存所有epoch的指标以便后续分析
 

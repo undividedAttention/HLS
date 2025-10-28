@@ -153,9 +153,10 @@ def run_grid_search(args, search_space):
                         gamma=gamma
                     )
                     
-                    # 训练几个epoch进行评估
+                    # 训练并记录所有epoch的指标
+                    all_epoch_metrics = []
                     best_dev_f1 = 0
-                    best_dev_metrics = None
+                    best_epoch = 0
                     
                     for epoch in range(args.epochs):
                         print(f"\nEpoch {epoch+1}/{args.epochs}")
@@ -190,27 +191,34 @@ def run_grid_search(args, search_space):
                               f"F1: {dev_f1:.4f}, P: {dev_p:.4f}, R: {dev_r:.4f}, "
                               f"AHD: {dev_ahd:.4f}, AUPRC: {dev_auprc:.4f}")
                         
-                        # 保存最佳结果
+                        # 记录每个epoch的指标
+                        epoch_metrics = {
+                            'epoch': epoch + 1,
+                            'dev_loss': dev_loss,
+                            'dev_accuracy': dev_acc,
+                            'dev_macro_f1': dev_f1,
+                            'dev_macro_precision': dev_p,
+                            'dev_macro_recall': dev_r,
+                            'dev_avg_hier_distance': dev_ahd,
+                            'dev_auprc': dev_auprc
+                        }
+                        all_epoch_metrics.append(epoch_metrics)
+                        
+                        # 跟踪最佳结果
                         if dev_f1 > best_dev_f1:
                             best_dev_f1 = dev_f1
-                            best_dev_metrics = {
-                                'config': config_name,
-                                'lambda_focal': lambda_focal,
-                                'lambda_hls': lambda_hls,
-                                'learning_rate': lr,
-                                'gamma': gamma,
-                                'epoch': epoch + 1,
-                                'dev_loss': dev_loss,
-                                'dev_accuracy': dev_acc,
-                                'dev_macro_f1': dev_f1,
-                                'dev_macro_precision': dev_p,
-                                'dev_macro_recall': dev_r,
-                                'dev_avg_hier_distance': dev_ahd,
-                                'dev_auprc': dev_auprc
-                            }
+                            best_epoch = epoch + 1
                     
-                    results.append(best_dev_metrics)
-                    print(f"\nBest Dev F1: {best_dev_f1:.4f}")
+                    # 保存最佳配置的结果
+                    best_metrics = all_epoch_metrics[best_epoch - 1].copy()
+                    best_metrics['config'] = config_name
+                    best_metrics['lambda_focal'] = lambda_focal
+                    best_metrics['lambda_hls'] = lambda_hls
+                    best_metrics['learning_rate'] = lr
+                    best_metrics['gamma'] = gamma
+                    
+                    results.append(best_metrics)
+                    print(f"\nBest Dev F1: {best_dev_f1:.4f} at Epoch {best_epoch}")
     
     # 保存结果
     os.makedirs(args.output_dir, exist_ok=True)
@@ -244,7 +252,7 @@ if __name__ == "__main__":
     parser.add_argument("--bert_path", type=str, default="./ZY-BERT")
     parser.add_argument("--output_dir", type=str, default="output_grid_search")
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--epochs", type=int, default=5)  # 网格搜索阶段只训练5个epoch
+    parser.add_argument("--epochs", type=int, default=15)  # 训练足够多的epochs以找到最佳结果
     
     args = parser.parse_args()
     
